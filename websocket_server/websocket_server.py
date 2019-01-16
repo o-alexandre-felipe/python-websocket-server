@@ -1,5 +1,7 @@
 # Author: Johan Hanssen Seferidis
 # License: MIT
+# Contributors: 
+#     Alexandre Felipe
 
 import sys
 import struct
@@ -49,6 +51,7 @@ OPCODE_PONG         = 0xA
 
 
 # -------------------------------- API ---------------------------------
+
 
 class API():
 
@@ -115,16 +118,16 @@ class WebsocketServer(ThreadingMixIn, TCPServer, API):
     allow_reuse_address = True
     daemon_threads = True  # comment to keep threads alive until finished
 
-    clients = []
-    id_counter = 0
 
     def __init__(self, port, host='127.0.0.1', loglevel=logging.WARNING):
         logger.setLevel(loglevel)
+        self.id_counter = 0
+        self.clients = dict();
+        self.behaviors = dict();
         TCPServer.__init__(self, (host, port), WebSocketHandler)
         self.port = self.socket.getsockname()[1]
-
     def _message_received_(self, handler, msg):
-        self.message_received(self.handler_to_client(handler), self, msg)
+        self.message_received(handler.client, self, msg)
 
     def _ping_received_(self, handler, msg):
         handler.send_pong(msg)
@@ -133,38 +136,117 @@ class WebsocketServer(ThreadingMixIn, TCPServer, API):
         pass
 
     def _new_client_(self, handler):
+        '''
+          This method starts a new connection and based on the GET request
+          url, determine if a special behavior must be assigned to this
+          connection.
+          
+          It assigns an id for the connection and saves it in a dictionary
+        '''
         self.id_counter += 1
-        client = {
-            'id': self.id_counter,
-            'handler': handler,
-            'address': handler.client_address
-        }
-        self.clients.append(client)
-        self.new_client(client, self)
-
+        url = handler.get_url(); 
+        if url in self.behaviors:
+          # The behavior for this url was defined externally
+          bhv = self.behaviors[url];
+          print(bhv);
+        else:
+          bhv = WebsocketClientBehavior; # default behavior
+        client = bhv(self, handler, self.id_counter)
+        print(client)
+        self.clients[client.id] = client;
+        client.on_open();
+      
     def _client_left_(self, handler):
         client = self.handler_to_client(handler)
-        self.client_left(client, self)
-        if client in self.clients:
-            self.clients.remove(client)
+        client.on_close();
+        if client.id in self.clients:
+           del self.clients[client.id]
 
     def _unicast_(self, to_client, msg):
-        to_client['handler'].send_message(msg)
+        to_client.handler.send_message(msg)
 
     def _multicast_(self, msg):
-        for client in self.clients:
+        for clientId, client in self.clients.items():
             self._unicast_(client, msg)
 
     def handler_to_client(self, handler):
-        for client in self.clients:
-            if client['handler'] == handler:
-                return client
+      '''
+        Alexandre Felipe:
+          Deprecated, this function was used formerly to determine the 
+          handler of a client, but this method is ugly and potentially
+          inneficient as the number of clients increase, it is better
+          to use the attribute handler.client
+      '''
+      for client_id, client in self.clients.items():
+        if client.handler == handler:
+           return client;
 
 
+class WebsocketClientBehavior:
+  '''
+  Author: Alexandre Felipe
+    Constructs an object to keep records of a connection
+    and provide handlers for connection events, different
+    behaviors may be implemented in the same websocket server
+    in different urls (services)
+
+    on_text  - method called when a text message is received
+    on_close - method called when the connection is closed
+    on_open  - method called when the connection is initiated
+
+    origin_validator is a method that can be used to prevent a connection
+                      by returning False
+  '''
+  def __init__(self, server, handler, id):
+    if 'origin' in handler.headers:
+      self.origin = handler.headers['origin']
+    else:
+      self.origin = None;
+    self.id = id;
+    self.handler = handler;
+    handler.client = self;
+    handler.client_id = id;
+    self.address = handler.client_address;
+    self.server = server;
+    # Performs the origin validation
+    if not self.origin_validator(self.origin):
+      # if the origin is not accepted the connection will be closed.
+      self.handler.keep_alive = 0;
+  def on_text(self, message):
+    ''' WebsocketClientBehavior.on_text(self, message)
+       Method called when a new text message is received
+       this function may be overriden 
+    '''
+    self.server.message_received(self, self.server, message);
+  def on_close(self):
+    ''' WebsocketClientBehavior.on_close(self)
+        when a connection is closed this method is called for
+        the corresponting instance
+    '''               
+    self.server.client_left(self, self.server);
+  def on_open(self):
+    ''' WebsocketClientBehavior.on_open(self)
+        Method called once when the connection is initiated
+        this function may be overriden
+    '''
+    self.server.new_client(self, self.server)
+  def origin_validator(self, origin):
+    ''' WebsocketClientBehavior.origin_validator(self):
+       Method called to decide if a given connection must be accepted
+       based on the connection origin.
+       This method may be overriden.
+    '''
+    return True;
+  def send_text(self, message):
+    ''' send_text(self, message)
+        a method to send text through the connection associated to this instance
+    '''
+    self.handler.send_text(message)
 class WebSocketHandler(StreamRequestHandler):
-
+    
     def __init__(self, socket, addr, server):
         self.server = server
+        self.headers = dict();
         StreamRequestHandler.__init__(self, socket, addr, server)
 
     def setup(self):
@@ -172,7 +254,6 @@ class WebSocketHandler(StreamRequestHandler):
         self.keep_alive = True
         self.handshake_done = False
         self.valid_client = False
-
     def handle(self):
         while self.keep_alive:
             if not self.handshake_done:
@@ -187,6 +268,11 @@ class WebSocketHandler(StreamRequestHandler):
             return map(ord, bytes)
         else:
             return bytes
+    def get_url(self):
+        ''' get_url - determine the url of the initial HTTP request '''
+        # given that the first line is something like
+        # GET /url HTTP/1.1
+        return self.headers['get'].split()[1];
 
     def read_next_message(self):
         try:
@@ -221,7 +307,7 @@ class WebSocketHandler(StreamRequestHandler):
             logger.warn("Binary frames are not supported.")
             return
         elif opcode == OPCODE_TEXT:
-            opcode_handler = self.server._message_received_
+            opcode_handler = lambda client, msg: client.on_text(msg);
         elif opcode == OPCODE_PING:
             opcode_handler = self.server._ping_received_
         elif opcode == OPCODE_PONG:
@@ -241,7 +327,7 @@ class WebSocketHandler(StreamRequestHandler):
         for message_byte in self.read_bytes(payload_length):
             message_byte ^= masks[len(message_bytes) % 4]
             message_bytes.append(message_byte)
-        opcode_handler(self, message_bytes.decode('utf8'))
+        opcode_handler(self.client, message_bytes.decode('utf8'))
 
     def send_message(self, message):
         self.send_text(message)
@@ -297,18 +383,18 @@ class WebSocketHandler(StreamRequestHandler):
         self.request.send(header + payload)
 
     def read_http_headers(self):
-        headers = {}
         # first line should be HTTP GET
         http_get = self.rfile.readline().decode().strip()
         assert http_get.upper().startswith('GET')
         # remaining should be headers
+        self.headers['get'] = http_get;
         while True:
             header = self.rfile.readline().decode().strip()
             if not header:
                 break
             head, value = header.split(':', 1)
-            headers[head.lower().strip()] = value.strip()
-        return headers
+            self.headers[head.lower().strip()] = value.strip()
+        return self.headers
 
     def handshake(self):
         headers = self.read_http_headers()
