@@ -103,14 +103,65 @@ server.set_fn_new_client(new_client)
 server.run_forever()
 ````
 
-## Client
+## WebsocketClientBehavior
+This class is used to determine the behavior of the server for a given connection. The **WebsocketClientBehavior** implements the default behavior, calling the server callbacks. 
 
-Client is just a dictionary passed along methods.
+A class inheriting **WebsocketClientBehavior** can be implemented and associated to a given URL so that one instance of the new class is created when the handshake of a connection to the given url is finished.
 
-```py
-{
-	'id'      : client_id,
-	'handler' : client_handler,
-	'address' : (addr, port)
-}
-```
+### Properties
+
+| Property | Description                                                |
+|----------|------------------------------------------------------------|
+| id       | a unique integer assigned by the server to this connection |
+| origin   | the origin stated in the request headers                   |
+| handler  | a reference to the handler of this connection              |
+| address  | (addr, port)                                               |
+
+### Events
+There are three methods that are invoked on specific events for the connection
+
+#### on_open
+Is invoked just after the hand shake is finished, it is recommended to use this method for instance initialization instead of the constructor method `__init__`, if you choose to override the `__init__` method you must take care of using the same method signature as the **WebsocketClientBehavior** and to initialize the class members consistently so that it can be used by the **WebsocketServer**.
+
+#### on_text
+This method is invoked when the connection receives a text package.
+
+#### on_close
+This method is invoked when the connection is closed.
+
+#### origin_validator
+This method is ivoked during the construction to give the developer a chance to close the connection if the origin is not desired.
+
+### Methods
+#### send_text
+This method makes possible to send a packet with text data
+
+### **WebsocketClientBehavior** implementation event
+
+````py
+class revBhv(WebsocketClientBehavior):
+  '''
+    Set a different behavior
+  '''
+  def on_open(self):
+    print('Connection (%d) open' % (self.id))
+  
+  def on_close(self):
+    print('Connection (%d) closed' % (self.id));
+  
+  def on_text(self, msg):
+    '''
+      if the text sent through msg is in the request headers
+      respond with that header.
+    '''
+    self.send_text('.'.join(msg[::-1]));
+  
+  def origin_validator(self, origin):
+    print('The origin is: %s' % repr(origin))
+    return True;
+
+# users connecting to 127.0.0.1:9001/reverse are served with revBhv
+server.behaviors['/reverse'] = revBhv;
+server.run_forever();
+
+````
