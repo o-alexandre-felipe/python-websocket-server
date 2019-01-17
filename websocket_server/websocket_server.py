@@ -148,11 +148,9 @@ class WebsocketServer(ThreadingMixIn, TCPServer, API):
         if url in self.behaviors:
           # The behavior for this url was defined externally
           bhv = self.behaviors[url];
-          print(bhv);
         else:
           bhv = WebsocketClientBehavior; # default behavior
         client = bhv(self, handler, self.id_counter)
-        print(client)
         self.clients[client.id] = client;
         client.on_open();
       
