@@ -29,11 +29,18 @@ For coding details have a look at the [*server.py*](https://github.com/Pithikos/
 
 Usage
 =======================
+
 You can get a feel of how to use the websocket server by running
 
-    python server.py
+    PYTHONPATH=$PWD python examples/server.py
 
-Then just open `client.html` in your browser and you should be able to send and receive messages.
+Then just open `examples/client.html` in your browser and you should be able to send and receive messages. If you open `examples/client_hdr.html` and type as message the name of some HTTP header the server will respond with the corresponding value. If you open `examples/client_rev.html` it will respond with the characters of the text sent reversed and interleaved with dots.
+
+For an example of event notification 
+
+    PYTHONPATH=$PWD python examples/
+
+The texts sent through `examples/notify.html` will generate notifications in an event source. In the page `examples/listen.html` it is possible to add a listener to any event source by sending two numbers, the first number is the listener identifier and the second is the handler priority.
 
 
 Testing
