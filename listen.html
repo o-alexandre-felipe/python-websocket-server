@@ -1,0 +1,66 @@
+<html>
+<head>
+  <title>Simple event listener</title>
+
+  <script type="text/javascript">
+    var ws;
+    
+    function init() {
+      // Connect to Web Socket
+      ws = new WebSocket("ws://localhost:9001/listen");
+      // Set event handlers.
+      ws.onopen = function() {
+        output("onopen");
+      };
+      
+      ws.onmessage = function(e) {
+        // e.data contains received string.
+        output("onmessage: " + e.data);
+      };
+      
+      ws.onclose = function() {
+        output("onclose");
+      };
+      ws.onerror = function(e) {
+        output("onerror");
+        console.log(e)
+      };
+    }
+    
+    function onSubmit() {
+      var input = document.getElementById("input");
+      // You can send message to the Web Socket using ws.send.
+      ws.send(input.value);
+      output("send: " + input.value);
+      input.value = "";
+      input.focus();
+    }
+    
+    function onCloseClick() {
+      ws.close();
+    }
+    
+    function output(str) {
+      var log = document.getElementById("log");
+      var escaped = str.replace(/&/, "&amp;").replace(/</, "&lt;").
+        replace(/>/, "&gt;").replace(/"/, "&quot;"); // "
+      log.innerHTML = escaped + "<br>" + log.innerHTML;
+    }
+  </script>
+</head>
+<body onload="init();">
+<div>
+This sample is connecting to ws://host:PORT<span style='font-weight:bold'>/listen</span> <br />
+
+The messages sent here will create a connection from this page and some notifier. Open the page <a href="notify.html" target="_blank">notify.html</a> to create an event notification.
+
+</div>
+  <form onsubmit="onSubmit(); return false;">
+    <input type="text" id="input">
+    <input type="submit" value="Send">
+    <button onclick="onCloseClick(); return false;">close</button>
+  </form>
+  <div id="log"></div>
+</body>
+</html>
+
